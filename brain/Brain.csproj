@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Hot-reloadable half of the bot. Built to bin/Brain.dll and copied to run/Brain.dll,
+       which Plugin.cs's Loader notices and loads into the running game. -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <AssemblyName>Brain</AssemblyName>
+    <RootNamespace>RepoBot</RootNamespace>
+    <LangVersion>9.0</LangVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <NoStdLib>true</NoStdLib>
+    <DisableImplicitFrameworkReferences>true</DisableImplicitFrameworkReferences>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+    <GenerateTargetFrameworkAttribute>false</GenerateTargetFrameworkAttribute>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <OutputPath>bin/</OutputPath>
+    <DebugType>none</DebugType>
+    <ManagedDir>$(MSBuildThisFileDirectory)../refs/Managed/</ManagedDir>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="$(ManagedDir)*.dll" />
+    <Reference Include="$(MSBuildThisFileDirectory)../refs/BepInEx.dll" />
+    <Reference Include="$(MSBuildThisFileDirectory)../refs/0Harmony.dll" />
+    <Reference Include="$(MSBuildThisFileDirectory)../plugin/bin/RepoBot.dll" />
+  </ItemGroup>
+</Project>
