@@ -1,13 +1,14 @@
 using System;
 using System.Collections.Generic;
+using System.Text.RegularExpressions;
 using UnityEngine;
 
 namespace RepoBot
 {
     /// <summary>
-    /// The bot can talk in the in-game chat (on the user's request). Every message starts with "[bot]" so
-    /// nobody mistakes it for the human, announcements are rate limited, and the bot never obeys what others
-    /// type in chat - only the 'say' command from run/cmd.txt (the user, through Claude) makes it talk on demand.
+    /// The player can talk in the in-game chat (on the user's request). The word "bot" is never written in chat
+    /// (no prefix, and it is stripped from any text), announcements are rate limited, and nobody can order the
+    /// player around through chat - only the 'say' command from run/cmd.txt makes it talk on demand.
     /// </summary>
     public partial class Brain
     {
@@ -23,7 +24,8 @@ namespace RepoBot
             ChatManager cm = R.GetStatic<ChatManager>(typeof(ChatManager), "instance");
             if (cm == null) { Plugin.Log.LogWarning("chat: no chat manager available here"); return false; }
             nextSay = Time.time + (force ? 1f : 8f);
-            string text = "[bot] " + msg.Trim();
+            string text = Regex.Replace(msg, @"\[?\bbots?\b\]?:?", "", RegexOptions.IgnoreCase).Trim();
+            if (text.Length == 0) return false;
             Plugin.Log.LogInfo("chat: " + text);
             try { cm.ForceSendMessage(text); return true; }
             catch (Exception e) { Plugin.Log.LogWarning("chat failed: " + e.Message); return false; }

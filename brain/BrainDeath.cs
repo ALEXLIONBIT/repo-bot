@@ -117,6 +117,7 @@ namespace RepoBot
                 lastHurtEnemy = R.Get<string>(e, "enemyName", "?");
                 who = lastHurtEnemy + " (" + EnemyStateName(e) + ") " + d.ToString("0.0") + "m away";
             }
+            if (who == "nobody close" && damage > 0 && SemiFunc.IsMultiplayer()) NoteAttacker(p, damage);
             lastHurtTime = Time.time;
             string line = Time.time.ToString("0.0", CultureInfo.InvariantCulture) + "s: hurt " + damage + " (enemy index " + enemyIndex + "), nearest: " + who +
                           " | hp now " + Hp() + " | bot " + state + " / " + status;

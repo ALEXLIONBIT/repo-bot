@@ -33,7 +33,18 @@ namespace RepoBot
                 Zone z = null;
                 foreach (Zone q in zones) if (q.name == name && (q.pos - pos).sqrMagnitude < 36f) { z = q; break; }
                 if (z == null) { z = new Zone(); z.name = name; zones.Add(z); }
-                z.pos = pos; z.radius = Mathf.Min(FleeRadius * 1.3f + Boost(name), 18f); z.until = now + 20f;
+                z.pos = pos; z.radius = Mathf.Min(FleeRadius + 3f + Boost(name) * 0.5f, 15f); z.until = now + 12f;
+            }
+        }
+
+        /// <summary>Keep targets away from a player who is hitting us as well, not only from monsters.</summary>
+        void UpdateHostileZones()
+        {
+            foreach (Vector3 hp in HostilePlayers())
+            {
+                Zone z = zones.Find(q => q.name == "player" && (q.pos - hp).sqrMagnitude < 36f);
+                if (z == null) { z = new Zone(); z.name = "player"; zones.Add(z); }
+                z.pos = hp; z.radius = 10f; z.until = Time.time + 6f;
             }
         }
 
@@ -51,7 +62,7 @@ namespace RepoBot
         {
             if (blockedSince == 0f) return 1f;
             float waited = Time.time - blockedSince;
-            return waited > 40f ? 0.35f : (waited > 20f ? 0.6f : 1f);
+            return waited > 25f ? 0.35f : (waited > 12f ? 0.6f : 1f);
         }
 
         bool PathCrossesDanger(Vector3[] c)
@@ -238,7 +249,7 @@ namespace RepoBot
             }
             foreach (ValuableObject v in vals)
             {
-                if (v == null || IsBlacklisted(v)) continue;
+                if (v == null || IsBlacklisted(v) || TakenByOthers(v)) continue;
                 Rigidbody rb = R.Get<Rigidbody>(v, "rb");
                 if ((rb != null ? rb.mass : 1f) > MaxMass) continue;
                 Vector3 vpos = v.transform.position;

@@ -65,6 +65,12 @@ namespace RepoBot
         {
             PollCommands();
             if (Keyboard.current != null && Keyboard.current.f9Key.wasPressedThisFrame) SetActive(!BotInput.Active);
+            // C switches the cheats (teleporting) on and off; they start off so the bot plays like a person
+            if (Keyboard.current != null && Keyboard.current.cKey.wasPressedThisFrame)
+            {
+                superpowers = !superpowers;
+                Plugin.Log.LogInfo("cheats (teleport) " + (superpowers ? "ON" : "OFF"));
+            }
 
             BotInput.BeginFrame();
             bool inLevel = InLevel();
@@ -173,9 +179,10 @@ namespace RepoBot
             Transform c = Cam();
             PhysGrabber pg = Grabber();
             if (pc == null || c == null || pg == null) { status = "no player/camera"; return; }
-            if (Dead()) { status = "dead / spectating"; return; }
+            if (Dead()) { status = "dead / spectating"; HeadStep(); return; }
             Vector3 p = pc.transform.position;
             if (Time.time >= nextRefresh) { Refresh(); TrackProgress(); }
+            UpdateTracks();
             if (!haveHome)
             {
                 // The truck. Remembered per level in run/homes.txt so a brain reload in mid-level does not take
@@ -231,8 +238,10 @@ namespace RepoBot
             vals = FindObjectsOfType<ValuableObject>().Where(v => v != null && v.gameObject.activeInHierarchy).ToList();
             cosmeticObjs = FindObjectsOfType<CosmeticWorldObject>().Where(v => v != null && v.gameObject.activeInHierarchy).ToList();
             eps = FindObjectsOfType<ExtractionPoint>().Where(e => e != null && !R.Get<bool>(e, "isShop")).ToList();
+            RefreshOthers();
             enemies = FindObjectsOfType<EnemyParent>().Where(e => e != null && R.Get<bool>(e, "Spawned") && EnemyOf(e) != null).ToList();
             UpdateZones();
+            UpdateHostileZones();
             RefreshHeads();
         }
 
@@ -267,9 +276,14 @@ namespace RepoBot
             {
                 if (e == null || !Dangerous(e)) continue;
                 Vector3 ep = EnemyPos(e);
-                // enemies that already killed us count as closer than they are (learned in BrainDeath.cs)
-                float d = Vector3.Distance(p, ep) - Boost(R.Get<string>(e, "enemyName"));
+                // enemies that already killed us, hunt us or run at us count as closer than they are
+                float d = EffectiveDistance(e, p);
                 if (d < dist) { dist = d; where = ep; }
+            }
+            foreach (Vector3 hp in HostilePlayers())
+            {
+                float hd = Vector3.Distance(p, hp) - 1f;
+                if (hd < dist) { dist = hd; where = hp; }
             }
             // an extraction point that is warning/extracting slams its tube down on whoever stands under it: treat it as a hazard
             foreach (ExtractionPoint xp in eps)
@@ -300,34 +314,33 @@ namespace RepoBot
             if (!danger || dist > radius)
             {
                 status = "enemy far, catching breath";
-                if (Time.time - stateT > 2.5f) { target = null; hasViewpoint = false; Go(S.Pick, "safe again"); }
+                if (Time.time - stateT > 2.5f) { target = null; hasViewpoint = false; noPressUntil = Time.time + 20f; Go(S.Pick, "safe again"); }   // do not walk straight back to the button we ran from
                 return;
             }
-            // superpower: simply vanish to the truck if that is away from the enemy
-            if (haveHome && Vector3.Distance(where, home) > 15f && TeleportPlayer(home, "escape from " + EnemyLabel(where))) return;
+            // superpower: vanish to the truck when it is clear of every enemy
+            if (haveHome && SpotClear(home, 15f) && TeleportPlayer(home, "escape from " + EnemyLabel(where))) return;
+            forceSprint = true;
+            if (FleeStuck(p))
+            {
+                // blocked by a wall or a door: change the plan right away
+                nextFleePick = 0f; jumpUntil = Time.time + 0.3f; strafeUntil = Time.time + 0.5f;
+                strafeDir = UnityEngine.Random.value < 0.5f ? -1f : 1f;
+            }
             if (Time.time >= nextFleePick)
             {
-                nextFleePick = Time.time + 1.0f;
-                Vector3 away = p - where; away.y = 0f;
-                away = away.sqrMagnitude < 0.01f ? Vector3.forward : away.normalized;
-                float cur = Vector3.Distance(p, where);   // real distance (dist above includes the learned margin)
-                float bestScore = float.MinValue;
-                bool found = false;
-                foreach (float reach in new[] { 14f, 9f, 5f })
-                    for (int a = -150; a <= 150; a += 30)
-                    {
-                        Vector3 cand = p + Quaternion.AngleAxis(a, Vector3.up) * away * reach;
-                        NavMeshHit h; float len;
-                        if (!NavMesh.SamplePosition(cand, out h, 6f, NavMesh.AllAreas) || !PathLength(p, h.position, out len)) continue;
-                        float farther = Vector3.Distance(h.position, where);
-                        if (farther < cur + 1f) continue;   // never pick a spot that is not clearly farther from the enemy than we are
-                        float score = farther - len * 0.3f;
-                        if (score > bestScore) { bestScore = score; fleeGoal = h.position; found = true; }
-                    }
-                if (!found) fleeGoal = p + away * 10f;   // cornered or no usable NavMesh: run straight away from it
+                nextFleePick = Time.time + 0.6f;
+                Vector3 g;
+                if (PickFleeGoal(p, out g)) fleeGoal = g;
+                else
+                {
+                    Vector3 away = p - where; away.y = 0f;
+                    fleeGoal = p + (away.sqrMagnitude < 0.01f ? Vector3.forward : away.normalized) * 10f;   // cornered: straight away
+                }
             }
-            status = "fleeing (" + dist.ToString("0") + "m)";
-            if (Follow(fleeGoal, 1.0f, true, 540f, 45f)) nextFleePick = 0f;   // arrived but the enemy is still near: pick a new spot at once
+            status = "fleeing (" + dist.ToString("0") + "m) from " + EnemyLabel(where) + " me " + p.x.ToString("0") + "," + p.z.ToString("0") + " it " + where.x.ToString("0") + "," + where.z.ToString("0");
+            bool arrived = Follow(fleeGoal, 1.0f, true, 540f, 45f);
+            forceSprint = false;
+            if (arrived) nextFleePick = 0f;   // arrived but the enemy is still near: pick a new spot at once
         }
 
         void DoHome()
@@ -337,7 +350,8 @@ namespace RepoBot
             status = readyToLeave ? "all done: back to the truck" : "waiting at the truck for the enemies to move away";
             // superpower: the truck's spawn point is where the game itself puts players; it is not on the NavMesh, so go there exactly
             if (readyToLeave && Vector3.Distance(p, home) > 3f && TeleportExact(home, "into the truck")) return;
-            bool arrived = Vector3.Distance(p, home) < 2.5f;
+            bool arrived = Vector3.Distance(p, home) < (ShopMode || readyToLeave ? 4f : 2.5f);
+            calmMove = readyToLeave;   // inside the truck: walk slowly, no sprint, no jumping
             if (!arrived && homeFail >= 2)
             {
                 // the way into the truck is blocked and teleporting is not allowed here: do not jump around forever
@@ -346,6 +360,7 @@ namespace RepoBot
                 return;
             }
             if (!arrived) arrived = Follow(home, 1.5f, true, 540f, 35f);
+            calmMove = false;
             if (!readyToLeave)
             {
                 if (Time.time - stateT > 8f) Go(S.Pick, "try again");   // waiting out an enemy, not leaving
@@ -395,6 +410,7 @@ namespace RepoBot
         {
             if (target == null) { Go(S.Pick, "target gone"); return; }
             if (Time.time - stateT > (PlayerTp ? 12f : 120f)) { GiveUp(180f); Go(S.Pick, "took too long"); return; }
+            if (!IsHead(target) && TakenByOthers(target)) { GiveUp(25f); target = null; Go(S.Pick, "a teammate has it (holding it or in the cart): leaving it"); return; }
             Transform c = Cam();
             Vector3 tc = Center(target);
             float reach = Mathf.Min(GrabDistance, R.Get<float>(pg, "grabRange", 4f) * 0.7f);
@@ -413,6 +429,7 @@ namespace RepoBot
         void DoGrab(Vector3 p, PhysGrabber pg)
         {
             if (target == null) { Go(S.Pick, "target gone"); return; }
+            if (!IsHead(target) && !HoldingTarget(pg) && TakenByOthers(target)) { GiveUp(25f); target = null; Go(S.Pick, "a teammate has it: leaving it"); return; }
             Transform c = Cam();
             Vector3 tc = Center(target);
             float gr = R.Get<float>(pg, "grabRange", 4f);
@@ -489,7 +506,13 @@ namespace RepoBot
             if (TeleportHeldObject(ep)) return;   // superpower: straight into the extraction point
             status = "carrying " + target.name + (ShopMode ? " to the checkout" : " to extraction");
             // turn slowly and only walk once aligned, so the object does not swing out of our hands
-            Follow(ShopMode ? ShopDrop(ep) : AreaDrop(ep, false), 0.3f, false, 150f, 15f);
+            // gently: slower the closer we get, no jumping, no sprint, turns only when nearly aligned
+            Vector3 dropAt = ShopMode ? ShopDrop(ep) : AreaDrop(ep, false);
+            float left = Vector3.Distance(p, dropAt);
+            moveScale = left < 4f ? 0.45f : 0.7f;
+            calmMove = true;
+            Follow(dropAt, 0.3f, false, 110f, 12f);
+            calmMove = false; moveScale = 1f;
         }
 
         void DoDeposit()
@@ -533,7 +556,7 @@ namespace RepoBot
             if (st != pressFrom) { Go(S.Pick, "extraction " + pressFrom + " -> " + st); return; }
             MeshRenderer btn = R.Get<MeshRenderer>(pressEp, "button");
             Vector3 bp = btn != null ? btn.bounds.center : pressEp.transform.position;
-            if (NearZone(bp, 4f) && Vector3.Distance(Cam().position, bp) > 6f)
+            if ((NearZone(bp, 4f) || !SpotClear(bp, FleeRadius + 8f)) && Vector3.Distance(Cam().position, bp) > 6f)
             {
                 // an awake enemy was seen around the button: do not walk into it, try again in a while
                 noPressUntil = Time.time + 20f;
@@ -740,8 +763,8 @@ namespace RepoBot
             }
             Transform c = Cam();
             float err = AimAt(new Vector3(next.x, c.position.y, next.z), turnRate);
-            BotInput.Move.y = err < alignDeg ? 1f : 0f;
-            if (sprintOk && err < 20f && R.Get<float>(pc, "EnergyCurrent") > 8f && flat.magnitude > 6f) Held.Add(InputKey.Sprint);
+            BotInput.Move.y = err < alignDeg ? moveScale : 0f;
+            if (SprintWise(pc, sprintOk && err < 25f && !calmMove && (flat.magnitude > 10f || forceSprint))) Held.Add(InputKey.Sprint);
             TrackStuck(p, next);
             return false;
         }
@@ -754,9 +777,12 @@ namespace RepoBot
             {
                 stuckCount++;
                 if (stuckCount >= 2 && TeleportPlayer(pathGoal, "stuck")) { stuckCount = 0; stuckPos = p; return; }   // superpower
-                jumpUntil = Time.time + 0.2f;
-                strafeUntil = Time.time + 0.6f;
-                strafeDir = UnityEngine.Random.value < 0.5f ? -1f : 1f;
+                if (!calmMove)   // never jump around inside the truck: low ceiling
+                {
+                    jumpUntil = Time.time + 0.2f;
+                    strafeUntil = Time.time + 0.6f;
+                    strafeDir = UnityEngine.Random.value < 0.5f ? -1f : 1f;
+                }
                 nextRepath = 0f;
                 if (stuckCount >= 5)
                 {
@@ -819,6 +845,8 @@ namespace RepoBot
                     else if (cmd == "revive") ReviveStep(manualRevive++);
                     else if (cmd == "kill") KillSelf();
                     else if (cmd == "hurt") HurtSelf(65);
+                    else if (cmd == "headmove on") { headMove = true; Plugin.Log.LogInfo("head driving ON"); }
+                    else if (cmd == "headmove off") { headMove = false; Plugin.Log.LogInfo("head driving OFF"); }
                     else if (cmd == "superpowers on") { superpowers = true; Plugin.Log.LogInfo("superpowers ON (teleport)"); }
                     else if (cmd == "superpowers off") { superpowers = false; Plugin.Log.LogInfo("superpowers OFF"); }
                     else if (cmd == "autoheal on") { autoHeal = true; Plugin.Log.LogInfo("auto-heal ON"); }

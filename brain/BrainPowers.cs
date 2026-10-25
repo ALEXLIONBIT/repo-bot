@@ -10,7 +10,7 @@ namespace RepoBot
     /// </summary>
     public partial class Brain
     {
-        bool superpowers = true;
+        bool superpowers = false;   // C in the game switches it
         float nextTeleport, nextObjTeleport;
 
         // The game only honours these teleports in some situations (singleplayer / host). We check that each one really
@@ -21,7 +21,8 @@ namespace RepoBot
         float tpCheckAt, objCheckAt;
         Component objTarget;
 
-        bool PlayerTp { get { return superpowers && playerTpOk; } }
+        // With other players in the game nothing is teleported: friends would see it, so the bot plays like a person.
+        bool PlayerTp { get { return superpowers && playerTpOk && !SemiFunc.IsMultiplayer(); } }
 
         void VerifyTeleports()
         {
@@ -72,7 +73,7 @@ namespace RepoBot
             Transform c = Cam();
             Quaternion rot = Quaternion.Euler(0f, c != null ? c.eulerAngles.y : 0f, 0f);
             pa.Spawn(h.position + Vector3.up * 0.2f, rot);
-            tpDest = h.position; tpCheckAt = Time.time + 1.2f;
+            if (tpCheckAt <= 0f) { tpDest = h.position; tpCheckAt = Time.time + 1.2f; }   // one pending check at a time, or it never fires
             nextTeleport = Time.time + 0.6f;
             nextRepath = 0f;
             Plugin.Log.LogInfo("teleport (" + why + ") to " + V(h.position));
@@ -88,7 +89,7 @@ namespace RepoBot
             Transform c = Cam();
             Quaternion rot = Quaternion.Euler(0f, c != null ? c.eulerAngles.y : 0f, 0f);
             pa.Spawn(dest + Vector3.up * 0.1f, rot);
-            tpDest = dest; tpCheckAt = Time.time + 1.2f;
+            if (tpCheckAt <= 0f) { tpDest = dest; tpCheckAt = Time.time + 1.2f; }
             nextTeleport = Time.time + 0.8f;
             nextRepath = 0f;
             Plugin.Log.LogInfo("teleport (" + why + ") exactly to " + V(dest));
@@ -105,7 +106,7 @@ namespace RepoBot
         /// <summary>Teleport the object we hold to an exact spot (the game's PhysGrabObject.Teleport).</summary>
         bool TeleportHeldObjectTo(Vector3 drop)
         {
-            if (!superpowers || !objectTpOk || Time.time < nextObjTeleport || target == null) return false;
+            if (!superpowers || !objectTpOk || SemiFunc.IsMultiplayer() || Time.time < nextObjTeleport || target == null) return false;
             PhysGrabObject pgo = R.Get<PhysGrabObject>(target, "physGrabObject");
             if (pgo == null) return false;
             if (Vector3.Distance(target.transform.position, drop) < 1f) return false;

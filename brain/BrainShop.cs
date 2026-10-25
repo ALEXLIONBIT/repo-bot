@@ -14,9 +14,13 @@ namespace RepoBot
     public partial class Brain
     {
         // ---- shopping policy (the team's money is shared: keep it modest) ----
-        const float SpendShare = 0.4f;   // never plan to spend more than this share of the team's money
-        const int MaxPurchases = 3;      // items we put in the cart per shop visit
-        static readonly string[] Wishlist = { "Health Upgrade", "Stamina Upgrade", "Strength Upgrade", "Sprint Speed Upgrade", "Range Upgrade" };
+        // With friends the money is shared, so stay modest; alone it is all ours and surviving longer pays for itself.
+        static float SpendShare { get { return SemiFunc.IsMultiplayer() ? 0.4f : 0.7f; } }   // never plan to spend more than this share of the money
+        static int MaxPurchases { get { return SemiFunc.IsMultiplayer() ? 3 : 6; } }          // items we put in the cart per shop visit
+        // How much each upgrade is worth to us: staying alive and being able to run come first, carrying power matters least
+        // (we never pick up the heavy things anyway).
+        static readonly string[,] Wishlist = { { "Health Upgrade", "10" }, { "Stamina Upgrade", "8" }, { "Sprint Speed Upgrade", "6" }, { "Range Upgrade", "4" }, { "Strength Upgrade", "3" } };
+        readonly Dictionary<string, int> boughtKinds = new Dictionary<string, int>();   // upgrades already chosen this visit: each extra one is worth less
 
         static bool ShopMode { get { return SemiFunc.RunIsShop(); } }
 
@@ -34,7 +38,7 @@ namespace RepoBot
 
         void ResetShop()
         {
-            bought = 0; paid = false; machineDone = false; equipDone = false; shopEpCache = null; shopInfoLogged = false;
+            boughtKinds.Clear(); bought = 0; paid = false; machineDone = false; equipDone = false; shopEpCache = null; shopInfoLogged = false;
             shopStart = 0; plannedSpend = 0;
         }
 
@@ -137,12 +141,24 @@ namespace RepoBot
             return InShoppingList(item) || (pos - ShopDrop(ep)).magnitude < 0.9f;
         }
 
-        static int WishRank(string name)
+        /// <summary>Worth of an upgrade to us (0 = not wanted); the second and third of a kind are worth less.</summary>
+        float Weight(string name)
         {
-            if (string.IsNullOrEmpty(name)) return -1;
-            for (int i = 0; i < Wishlist.Length; i++)
-                if (name.IndexOf(Wishlist[i], StringComparison.OrdinalIgnoreCase) >= 0) return i;
-            return -1;
+            if (string.IsNullOrEmpty(name)) return 0f;
+            for (int i = 0; i < Wishlist.GetLength(0); i++)
+                if (name.IndexOf(Wishlist[i, 0], StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    int n; boughtKinds.TryGetValue(Wishlist[i, 0], out n);
+                    return float.Parse(Wishlist[i, 1], System.Globalization.CultureInfo.InvariantCulture) * Mathf.Pow(0.6f, n);
+                }
+            return 0f;
+        }
+
+        static string KindOf(string name)
+        {
+            for (int i = 0; i < Wishlist.GetLength(0); i++)
+                if (!string.IsNullOrEmpty(name) && name.IndexOf(Wishlist[i, 0], StringComparison.OrdinalIgnoreCase) >= 0) return Wishlist[i, 0];
+            return null;
         }
 
         // ---- deciding what to do in the shop ---------------------------------------------------
@@ -189,7 +205,7 @@ namespace RepoBot
             if (bought < MaxPurchases && budget > 0)
             {
                 ItemAttributes best = null;
-                int bestRank = int.MaxValue, bestPrice = int.MaxValue;
+                float bestScore = float.MinValue; int bestPrice = 0;
                 int seen = 0, notWished = 0, tooPricey = 0, atCheckout = 0, banned = 0;
                 foreach (ItemAttributes ia in FindObjectsOfType<ItemAttributes>())
                 {
@@ -197,11 +213,13 @@ namespace RepoBot
                     seen++;
                     if (IsBlacklisted(ia)) { banned++; continue; }
                     int price = R.Get<int>(ia, "value");
-                    int rank = WishRank(R.Get<string>(ia, "itemName"));
-                    if (rank < 0 || price <= 0) { notWished++; continue; }
+                    float weight = Weight(R.Get<string>(ia, "itemName"));
+                    if (weight < 1.5f || price <= 0) { notWished++; continue; }
                     if (price > budget) { tooPricey++; continue; }
                     if (InShoppingList(ia)) { atCheckout++; continue; }   // already in the cart
-                    if (rank < bestRank || (rank == bestRank && price < bestPrice)) { best = ia; bestRank = rank; bestPrice = price; }
+                    // the most useful one that does not eat the whole budget: a cheap good upgrade beats a dear one of the same kind
+                    float score = weight * (1f - 0.5f * price / budget);
+                    if (score > bestScore) { best = ia; bestScore = score; bestPrice = price; }
                 }
                 if (best == null)
                     LogEvery(5f, "shop pick found nothing: " + seen + " shop items, " + notWished + " not on the wishlist, " + tooPricey + " over budget (" + budget +
@@ -215,6 +233,8 @@ namespace RepoBot
                         Blacklist(best, 120f);
                         return;
                     }
+                    string kind = KindOf(R.Get<string>(best, "itemName"));
+                    if (kind != null) { int kn; boughtKinds.TryGetValue(kind, out kn); boughtKinds[kind] = kn + 1; }
                     target = best; bought++; plannedSpend += bestPrice; grabFails = drops = depositTries = 0; hasViewpoint = false; triedViews.Clear();
                     Go(S.ToValuable, "buy " + R.Get<string>(best, "itemName") + " for " + bestPrice + " (money " + currency + ", cart " + cart + ")");
                     return;

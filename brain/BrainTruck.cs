@@ -81,7 +81,10 @@ namespace RepoBot
                 Plugin.Log.LogInfo("calling the truck screen's GotoNextLevel()");
                 scr.GotoNextLevel();
             }
-            if (Vector3.Distance(Cam().position, sp) > 2.2f && !Follow(sp, 1.2f, false, 540f, 35f)) { if (Time.time - stateT > 30f) { noAdvanceUntil = Time.time + 60f; Go(S.Home, "could not start the next level"); } return; }
+            calmMove = true;
+            bool reached = Vector3.Distance(Cam().position, sp) <= 2.2f || Follow(sp, 1.2f, false, 540f, 35f);
+            calmMove = false;
+            if (!reached) { if (Time.time - stateT > 30f) { noAdvanceUntil = Time.time + 60f; Go(S.Home, "could not start the next level"); } return; }
             AimAt(sp, 540f);
             Held.Add(((Time.time - stateT) % 6f) < 3f ? InputKey.Grab : InputKey.Interact);
             if (Time.time - stateT > 30f) { noAdvanceUntil = Time.time + 60f; Go(S.Home, "the truck screen did not start the next level"); }
