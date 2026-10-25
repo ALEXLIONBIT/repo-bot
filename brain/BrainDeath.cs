@@ -183,7 +183,7 @@ namespace RepoBot
         void WatchPosition()
         {
             PlayerController pc = Local();
-            if (pc == null || Dead()) return;
+            if (pc == null || Dead() || SemiFunc.RunIsTutorial()) return;   // the tutorial level has no walkable mesh: nothing to correct
             Vector3 p = pc.transform.position;
 
             if (teleportAt > 0f && Time.time >= teleportAt)

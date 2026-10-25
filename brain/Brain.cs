@@ -122,7 +122,7 @@ namespace RepoBot
 
         static bool InLevel()
         {
-            if (!SemiFunc.RunIsLevel() && !SemiFunc.RunIsShop()) return false;
+            if (!SemiFunc.RunIsLevel() && !SemiFunc.RunIsShop() && !SemiFunc.RunIsTutorial()) return false;
             LevelGenerator lg = R.GetStatic<LevelGenerator>(typeof(LevelGenerator), "Instance");
             return lg != null && R.Get<bool>(lg, "Generated") && Local() != null;
         }
@@ -181,6 +181,7 @@ namespace RepoBot
             if (pc == null || c == null || pg == null) { status = "no player/camera"; return; }
             if (Dead()) { status = "dead / spectating"; HeadStep(); return; }
             Vector3 p = pc.transform.position;
+            if (SemiFunc.RunIsTutorial()) { TutorialStep(p); return; }
             if (Time.time >= nextRefresh) { Refresh(); TrackProgress(); }
             UpdateTracks();
             if (!haveHome)
@@ -842,6 +843,7 @@ namespace RepoBot
                     if (cmd == "on") SetActive(true);
                     else if (cmd == "off") SetActive(false);
                     else if (cmd == "dump") Dump();
+                    else if (cmd == "tutorial") StartTutorialFromMenu();
                     else if (cmd == "revive") ReviveStep(manualRevive++);
                     else if (cmd == "kill") KillSelf();
                     else if (cmd == "hurt") HurtSelf(65);
